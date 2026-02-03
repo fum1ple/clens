@@ -19,13 +19,14 @@ Express を Hono に置き換え、read-only viewer を read/write editor に拡
 | CLI | Commander.js | difit と同一。引数解析の実績十分 |
 | サーバー | **Hono** (@hono/node-server) | 軽量・TS-first。npx 起動時の初回ダウンロードが速い |
 | リアルタイム通信 | **SSE** (hono/streaming) | サーバー → クライアントの一方向通知で十分。WebSocket 不要 |
-| ファイルウォッチ | chokidar | ファイルシステム監視の定番 |
-| フロントエンド | React 18 + Vite | difit と同パターン。HMR 対応 |
+| ファイルウォッチ | chokidar v4 | ファイルシステム監視の定番。ESM-only で Node.js 20+ 要件と整合 |
+| フロントエンド | React 19 + Vite | 新規プロジェクトのため最新安定版を採用。HMR 対応 |
 | エディタ | **CodeMirror 6** | 軽量でバンドルサイズが小さい。Markdown サポート良好 |
 | プレビュー | react-markdown + remark-gfm | GFM テーブル・チェックリスト等を含む Markdown レンダリング |
-| スタイリング | Tailwind CSS v4 | difit と同一 |
+| スタイリング | Tailwind CSS v4 | CSS-first 設定でゼロ JS 設定ファイル。ビルドが高速 |
 | テスト | Vitest | difit と同一。co-located test files |
 | Lint / Format | ESLint + Prettier | difit と同一 |
+| 状態管理 | React Context | 外部ライブラリ不要。アプリの状態規模が小さく Context で十分 |
 
 ---
 
@@ -43,7 +44,8 @@ clens/
 │   │   ├── index.ts                # Hono アプリ定義
 │   │   ├── routes/
 │   │   │   ├── api.ts              # REST API（ファイル CRUD）
-│   │   │   └── sse.ts              # SSE エンドポイント
+│   │   │   ├── sse.ts              # SSE エンドポイント
+│   │   │   └── middleware.ts       # パス検証・セキュリティミドルウェア
 │   │   ├── services/
 │   │   │   ├── scanner.ts          # スキル / コマンド自動検出
 │   │   │   ├── watcher.ts          # chokidar ファイルウォッチ
@@ -59,6 +61,8 @@ clens/
 │   │   │   ├── Preview.tsx         # Markdown プレビュー
 │   │   │   ├── SplitView.tsx       # 分割レイアウト管理
 │   │   │   └── NewFileDialog.tsx   # テンプレート選択ダイアログ
+│   │   ├── contexts/
+│   │   │   └── AppContext.tsx       # アプリケーション状態（選択中ファイル、ダーティ状態等）
 │   │   ├── hooks/
 │   │   │   ├── useSSE.ts           # SSE イベント購読
 │   │   │   └── useFileApi.ts       # REST API 呼び出し
@@ -87,7 +91,7 @@ clens/
 
 ## 4. ビルドと配布
 
-- **開発モード (`pnpm run dev`):** Vite dev server（HMR）+ CLI サーバーを同時起動
+- **開発モード (`pnpm run dev`):** Vite dev server（HMR）+ Hono サーバーを同時起動。Vite の `server.proxy` 設定により、`/api/*` へのリクエストを Hono サーバー（別ポート）に転送する
 - **本番モード (`pnpm run build`):** Vite でフロントエンドをビルド → `dist/` に出力
 - **npm 配布:** ビルド済みフロントエンドをパッケージに同梱。`npx clens` で即時起動可能
 - **tsconfig 分離:** `tsconfig.json`（フロントエンド / Vite 用）と `tsconfig.cli.json`（CLI + サーバー用）
@@ -96,24 +100,44 @@ clens/
 
 ## 5. API 設計
 
+> **スコープ注記:** 要件定義書 US-7「CLAUDE.md のセクションをアウトラインとして見たい」は Should 要件であり、MVP（初期リリース）のスコープ外とする。アウトライン表示に関する API エンドポイントやコンポーネント設計は v2 以降で検討する。
+
 ### 5.1 REST API
+
+`:path` パラメータにはスラッシュを含む相対パス（例: `.claude/skills/my-skill/SKILL.md`）が入る。Hono のデフォルトルーターは `/` をパスセグメントの区切りとして扱うため、ワイルドカードルート構文を使用する。
+
+実装時のルート定義: `/api/files/:path{.+}`
 
 | メソッド | パス | 説明 | リクエスト | レスポンス |
 |----------|------|------|------------|------------|
 | `GET` | `/api/files` | ファイルツリー取得 | — | `FileTree` |
-| `GET` | `/api/files/:path` | ファイル内容取得 | — | `{ content: string, updatedAt: string }` |
-| `PUT` | `/api/files/:path` | ファイル保存（上書き） | `{ content: string }` | `{ success: boolean }` |
-| `POST` | `/api/files` | 新規ファイル作成 | `{ path: string, templateId?: string }` | `{ success: boolean, path: string }` |
-| `DELETE` | `/api/files/:path` | ファイル削除 | — | `{ success: boolean }` |
+| `GET` | `/api/files/:path{.+}` | ファイル内容取得 | — | `{ content: string, updatedAt: string }` |
+| `PUT` | `/api/files/:path{.+}` | ファイル保存（上書き）。成功時 200 | `{ content: string }` | `{ updatedAt: string }` |
+| `POST` | `/api/files` | 新規ファイル作成。指定パスに既存ファイルがある場合は 409 Conflict を返す | `{ path: string, templateId?: string }` | `{ path: string }` |
+| `DELETE` | `/api/files/:path{.+}` | ファイル削除。スキルの場合はディレクトリごと削除する。成功時 204 No Content | — | （なし） |
 | `GET` | `/api/templates` | テンプレート一覧取得 | — | `Template[]` |
+
+#### 主要エラーステータスコード
+
+すべてのエラーレスポンスは `ApiError` 型（§5.3 参照）に準拠する。
+
+| ステータスコード | エラーコード | 発生条件 |
+|---|---|---|
+| `400 Bad Request` | `BAD_REQUEST` | リクエストボディの形式不正 |
+| `403 Forbidden` | `FORBIDDEN` | パストラバーサル検出、対象外ファイルへのアクセス |
+| `404 Not Found` | `NOT_FOUND` | 指定パスのファイルが存在しない |
+| `409 Conflict` | `CONFLICT` | POST で既存ファイルと衝突 |
+| `500 Internal Server Error` | `INTERNAL_ERROR` | サーバー内部エラー |
 
 ### 5.2 SSE
 
 | エンドポイント | イベント | ペイロード |
 |----------------|----------|------------|
-| `GET /api/sse` | `file:changed` | `{ path: string, content: string }` |
+| `GET /api/sse` | `file:changed` | `{ path: string }` |
 | | `file:created` | `{ path: string }` |
 | | `file:deleted` | `{ path: string }` |
+
+> **設計判断:** `file:changed` のペイロードにはファイル内容を含めない。クライアントは通知を受け取った後、現在開いているファイルの変更であれば `GET /api/files/:path{.+}` で最新内容を取得する。これにより、開いていないファイルの変更時に不要なデータ転送を回避する。
 
 ### 5.3 型定義
 
@@ -149,7 +173,39 @@ interface Template {
   description: string;
   content: string;
 }
+
+// エラーレスポンス共通型
+interface ApiError {
+  error: string;          // エラーコード（例: "NOT_FOUND", "FORBIDDEN", "CONFLICT"）
+  message: string;        // 人間可読なエラーメッセージ
+}
 ```
+
+### 5.4 セキュリティ設計
+
+要件定義書 §8.3 で定義されたセキュリティ要件を以下の方針で実現する。
+
+#### パストラバーサル防止
+
+API ルート `/api/files/:path{.+}` に対する共通ミドルウェアで、受け取ったパスを以下の手順で検証する。
+
+1. `path.resolve()` でパスを正規化し、`..` を含むトラバーサルを排除する
+2. 正規化後のパスが `--root` で指定されたプロジェクトルートディレクトリ配下であることを検証する
+3. 検証に失敗した場合は `403 Forbidden` を返す
+
+#### 対象ファイル制限
+
+ファイル操作 API は以下のパスパターンに一致するファイルのみを許可するホワイトリスト方式とする。
+
+- `CLAUDE.md`（プロジェクトルート直下）
+- `.claude/skills/**/SKILL.md`
+- `.claude/commands/*.md`
+
+上記に一致しないパスへのアクセスは `403 Forbidden` を返す。
+
+#### 実装方針
+
+上記のパス検証とファイル制限は、各 API ルートで個別に実装するのではなく、Hono のミドルウェアとして `src/server/routes/middleware.ts` 内に共通処理として実装する。
 
 ---
 
@@ -174,12 +230,22 @@ npx clens
   ├─ 4. ブラウザを自動起動（localhost:4567）
   │
   └─ 5. ユーザー操作ループ
-         ├─ ファイルツリーからファイル選択 → GET /api/files/:path
+         ├─ ファイルツリーからファイル選択 → GET /api/files/:path{.+}
          ├─ エディタで編集 → リアルタイムプレビュー反映
-         ├─ Save ボタン → PUT /api/files/:path → ファイルに書き戻し
+         ├─ Save ボタン → PUT /api/files/:path{.+} → ファイルに書き戻し
          ├─ 外部で変更 → chokidar 検知 → SSE で通知 → ブラウザ自動更新
          └─ + New → テンプレート選択 → POST /api/files → 作成してエディタで開く
 ```
+
+### 6.1 watcher → SSE モジュール間通信
+
+`watcher.ts` と `sse.ts` 間の通信には Node.js 標準の `EventEmitter` パターンを採用する。
+
+1. `watcher.ts` が `EventEmitter` のインスタンスを公開する
+2. `sse.ts` が起動時にそのインスタンスのイベントを購読する
+3. ファイル変更検知時、`watcher.ts` がイベントを emit し、`sse.ts` が接続中の全クライアントに SSE メッセージを配信する
+
+複数クライアントが同時に SSE 接続している場合は、全接続に対して同一イベントをブロードキャストする。
 
 ---
 
@@ -267,4 +333,27 @@ npx clens --no-open
 
 ### Output
 [Example output]
+```
+
+### 10.2 Basic Command
+
+```markdown
+---
+description: [Brief description of what this command does]
+---
+
+# [Command Name]
+
+[Detailed instructions for the AI agent when this command is invoked]
+
+## Steps
+
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+## Constraints
+
+- [Constraint 1]
+- [Constraint 2]
 ```
