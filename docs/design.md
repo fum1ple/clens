@@ -430,3 +430,184 @@ description: [Brief description of what this command does]
 - [Constraint 1]
 - [Constraint 2]
 ```
+
+---
+
+## 11. 実装単位（Phase 1）
+
+Phase 1 の実装を以下の 10 ユニットに分割する。各ユニットは独立してテスト可能な境界を持ち、依存ユニットの完了後に着手できる。
+
+### 依存グラフ
+
+```
+U1 プロジェクト初期化
+ └─ U2 共有型・定数
+     ├─ U3 Scanner サービス ─────┐
+     ├─ U4 セキュリティミドルウェア ─┤
+     │                          ▼
+     │                    U5 REST API + サーバー
+     │                     └─ U6 CLI
+     └─ U7 フロントエンド基盤
+         ├─ U8 Explorer
+         ├─ U9 Editor + Preview
+         │   │
+         ▼   ▼
+       U10 画面統合
+```
+
+> U3 / U4 は互いに独立しており並行実装可能。U8 / U9 も同様。
+
+---
+
+### U1: プロジェクト初期化
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `package.json`, `tsconfig.json`, `tsconfig.cli.json`, `vite.config.ts`, `vitest.config.ts`, `index.html`, `.eslintrc.*`, `.prettierrc` |
+| 依存 | なし |
+| 境界 | — |
+| 完了条件 | `pnpm install` が成功する。`pnpm run build` が空のフロントエンドをビルドできる。`pnpm test` が Vitest を起動できる（テスト 0 件で正常終了） |
+
+**実装メモ:**
+- `package.json` の `bin` フィールドに CLI エントリポイントを定義（実体は U6 で実装）
+- `vite.config.ts` に `server.proxy` 設定（`/api` → Hono サーバー）を含める（§4 参照）
+- `tsconfig.cli.json` は `src/cli/` と `src/server/` と `src/shared/` を対象とする
+
+---
+
+### U2: 共有型・定数
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/shared/types.ts`, `src/shared/constants.ts` |
+| 依存 | U1 |
+| 境界 | 他のすべてのユニットがインポートする型と定数を提供する |
+| 完了条件 | `FileCategory`, `FileNode`, `FileTree`, `ApiError` の型が定義されている。パスパターン（`CLAUDE.md`, `.claude/skills/**/SKILL.md`, `.claude/commands/*.md`）の定数が定義されている |
+
+**実装メモ:**
+- §5.3 の型定義をそのまま実装する
+- `constants.ts` にはパスパターンの glob 文字列、カテゴリラベル等を定義する
+
+---
+
+### U3: Scanner サービス
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/server/services/scanner.ts` + テスト |
+| 依存 | U2 |
+| 入力 | プロジェクトルートの絶対パス（`string`） |
+| 出力 | `FileTree` |
+| 完了条件 | 以下のテストが通る: (1) skills / commands / CLAUDE.md を正しく検出する (2) `FileNode.name` が §5.3 の導出ルールに従う (3) `FileNode.description` が §5.3 の抽出ルールに従う（skill: 見出し直後の段落、command: frontmatter の description） (4) skills は `path` の辞書順、commands は `name` の辞書順でソートされる (5) 対象ファイルが存在しない場合に空の `FileTree` を返す |
+
+**実装メモ:**
+- `glob` または `fs.readdir` + 再帰でファイルを検出する
+- Markdown パース（description 抽出）は正規表現ベースの軽量実装で十分。フル Markdown パーサーは不要
+- コマンドの frontmatter 解析: ファイル先頭の `---` ～ `---` ブロックを抽出し、`description:` 行の値を取得する
+
+---
+
+### U4: セキュリティミドルウェア
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/server/routes/middleware.ts` + テスト |
+| 依存 | U2 |
+| 入力 | Hono の `Context`（リクエストパスを含む） |
+| 出力 | 検証通過 → `next()` / 検証失敗 → `403 Forbidden`（`ApiError` 形式） |
+| 完了条件 | 以下のテストが通る: (1) `../` を含むパスを 403 で拒否する (2) ホワイトリスト外のパス（例: `src/index.ts`）を 403 で拒否する (3) `CLAUDE.md`, `.claude/skills/x/SKILL.md`, `.claude/commands/x.md` を通過させる |
+
+**実装メモ:**
+- §5.5 のパストラバーサル防止 + 対象ファイル制限の 2 段階検証を 1 つのミドルウェア関数にまとめる
+- プロジェクトルートパスはミドルウェア生成時に注入する（クロージャまたはファクトリ関数）
+
+---
+
+### U5: REST API + サーバー
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/server/routes/api.ts`, `src/server/index.ts`, `src/server/types.ts` + テスト |
+| 依存 | U3, U4 |
+| 入力 | HTTP リクエスト |
+| 出力 | §5.1 に準拠した HTTP レスポンス |
+| 完了条件 | 以下のテストが通る: (1) `GET /api/files` → `FileTree` を返す (2) `GET /api/files/:path` → `{ content, updatedAt }` を返す (3) `PUT /api/files/:path` → ファイルに書き込み `{ updatedAt }` を返す (4) 存在しないパスに 404 を返す (5) ミドルウェアが適用されている（403 ケース） |
+
+**実装メモ:**
+- `src/server/index.ts` は Hono アプリを生成・エクスポートする関数とする。`@hono/node-server` による `serve()` 呼び出しは CLI 側（U6）で行う
+- テストでは `app.request()` を使い、実際の HTTP サーバーを起動せずにルートをテストする
+- ビルド済みフロントエンドの静的配信設定もこのユニットに含める（`hono/serve-static` 等）
+
+---
+
+### U6: CLI エントリポイント
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/cli/index.ts`, `src/cli/args.ts`, `src/cli/open-browser.ts` |
+| 依存 | U5 |
+| 入力 | コマンドライン引数（`--port`, `--root`, `--no-open`, `--host`） |
+| 出力 | Hono サーバーの起動 + ブラウザ自動起動 |
+| 完了条件 | (1) `--port`, `--root`, `--no-open`, `--host` の引数が正しく解析される (2) サーバーが起動しターミナルに URL が表示される (3) `--no-open` 指定時にブラウザが起動しない (4) ポートが使用中の場合に +1 でフォールバックする |
+
+**実装メモ:**
+- Commander.js で引数を定義する
+- ブラウザ起動には `open` パッケージを使用する
+- ポートフォールバック: `serve()` が `EADDRINUSE` を返した場合にポート +1 で再試行する
+
+---
+
+### U7: フロントエンド基盤
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/app/main.tsx`, `src/app/App.tsx`, `src/app/contexts/AppContext.tsx`, `src/app/hooks/useFileApi.ts`, `src/app/styles/` |
+| 依存 | U2 |
+| 境界 | 以下の状態と関数をコンポーネントツリーに提供する |
+| 完了条件 | (1) `AppContext` が `FileTree`、選択中ファイルパス、エディタ内容、ダーティフラグを管理する (2) `useFileApi` が `GET /api/files`, `GET /api/files/:path`, `PUT /api/files/:path` を呼び出せる (3) `App.tsx` が空のレイアウト（Explorer / Editor / Preview の配置枠）をレンダリングする (4) Tailwind CSS が適用されている |
+
+**`AppContext` が管理する状態:**
+
+| 状態 | 型 | 説明 |
+|------|----|------|
+| `fileTree` | `FileTree \| null` | ファイルツリー |
+| `selectedPath` | `string \| null` | 選択中ファイルの相対パス |
+| `content` | `string` | エディタ上の現在の内容 |
+| `savedContent` | `string` | 最後に保存 / 読み込みした内容 |
+| `isDirty` | `boolean` | `content !== savedContent` |
+
+---
+
+### U8: Explorer コンポーネント
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/app/components/Explorer.tsx` |
+| 依存 | U7 |
+| 入力 | `AppContext` から `fileTree`, `selectedPath` |
+| 出力 | ファイル選択イベント（`selectedPath` を更新） |
+| 完了条件 | (1) CLAUDE.md / Skills / Commands のカテゴリ別にファイルを表示する (2) §5.4 のネストスキル表示名ルール（name 重複時の親パス付与）が正しく動作する (3) カテゴリはデフォルトで展開状態 (4) 選択中ファイルがハイライトされる |
+
+---
+
+### U9: Editor + Preview コンポーネント
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/app/components/Editor.tsx`, `src/app/components/Preview.tsx` |
+| 依存 | U7 |
+| 入力 | `AppContext` から `content` |
+| 出力 | Editor: `content` の更新 / Preview: Markdown レンダリング |
+| 完了条件 | (1) CodeMirror 6 が Markdown シンタックスハイライト付きで表示される (2) エディタ入力が `AppContext.content` を更新する (3) Preview が `content` を react-markdown + remark-gfm でレンダリングする (4) エディタ入力からプレビュー反映までの遅延が 100ms 以下（§8.1 デバウンス） |
+
+---
+
+### U10: 画面統合
+
+| 項目 | 内容 |
+|------|------|
+| 対象ファイル | `src/app/components/SplitView.tsx`, `src/app/App.tsx`（更新） |
+| 依存 | U8, U9 |
+| 入力 | Explorer / Editor / Preview の各コンポーネント |
+| 出力 | §4（requirements.md）のレイアウトに準拠した統合画面 |
+| 完了条件 | (1) Explorer + Editor + Preview が §4 のレイアウト通り配置される (2) Editor と Preview の分割比率が 50:50 (3) Save ボタンが `PUT /api/files/:path` を呼び出し、成功時にダーティフラグをリセットする (4) Revert ボタンが `savedContent` にエディタ内容を戻す (5) Ctrl+S / Cmd+S で保存できる (6) 未保存変更時のファイル切り替えで確認ダイアログが表示される（§8.2） (7) 未保存変更時のブラウザ離脱で `beforeunload` 確認が表示される（§8.3） (8) 対象ファイルが 0 件の場合に空状態ガイダンスが表示される（§4.4）  |
