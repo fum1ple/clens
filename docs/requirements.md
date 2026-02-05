@@ -21,20 +21,29 @@ Claude Code や Codex などの AI コーディングエージェントの普及
 - **対象ツール:** Claude Code（初期リリース）
 - **対象外:** Codex, Cursor, Windsurf 等の他ツール（将来の拡張候補）
 
+### 1.5 Phase 定義
+
+開発は 2 Phase に分割し、段階的にリリースする。
+
+| Phase | ゴール | 判断基準 |
+|-------|--------|----------|
+| **Phase 1（MVP）** | 最小限の閲覧・編集・保存。clens のコアバリューを最速で検証する | 既存ファイルの一覧表示・編集・保存が一通り動作する |
+| **Phase 2（ワークフロー完成）** | 外部変更同期・新規作成・削除。開発ワークフローとしての完成度を上げる | Phase 1 の安定稼働を確認後に着手 |
+
 ---
 
 ## 2. ユーザーストーリー
 
-| # | ストーリー | 優先度 |
-|---|-----------|--------|
-| US-1 | 開発者として、`npx clens` を実行するだけでブラウザが開き、プロジェクト内のスキル・コマンド・CLAUDE.md を一覧で見たい | **Must** |
-| US-2 | 開発者として、ファイルツリーからファイルを選択し、左にエディタ・右にプレビューの split view で編集したい | **Must** |
-| US-3 | 開発者として、エディタで編集した内容がリアルタイムでプレビューに反映されてほしい | **Must** |
-| US-4 | 開発者として、保存ボタンを押すと実ファイルに書き戻されてほしい | **Must** |
-| US-5 | 開発者として、外部エディタ（VS Code 等）でファイルを変更したとき、ブラウザ側にも変更が自動反映されてほしい | **Must** |
-| US-6 | 開発者として、テンプレートを選んで新しいスキルやコマンドをすぐに作りたい | **Must** |
-| US-7 | 開発者として、CLAUDE.md のセクションをアウトラインとして見たい | **Should** |
-| US-8 | 開発者として、ファイルを削除できるようにしたい | **Should** |
+| # | ストーリー | 優先度 | Phase |
+|---|-----------|--------|-------|
+| US-1 | 開発者として、`npx clens` を実行するだけでブラウザが開き、プロジェクト内のスキル・コマンド・CLAUDE.md を一覧で見たい | **Must** | 1 |
+| US-2 | 開発者として、ファイルツリーからファイルを選択し、左にエディタ・右にプレビューの split view で編集したい | **Must** | 1 |
+| US-3 | 開発者として、エディタで編集した内容がリアルタイムでプレビューに反映されてほしい | **Must** | 1 |
+| US-4 | 開発者として、保存ボタンを押すと実ファイルに書き戻されてほしい | **Must** | 1 |
+| US-5 | 開発者として、外部エディタ（VS Code 等）でファイルを変更したとき、ブラウザ側にも変更が自動反映されてほしい | **Must** | 2 |
+| US-6 | 開発者として、テンプレートを選んで新しいスキルやコマンドをすぐに作りたい | **Must** | 2 |
+| US-7 | 開発者として、CLAUDE.md のセクションをアウトラインとして見たい | **Should** | 2 |
+| US-8 | 開発者として、ファイルを削除できるようにしたい | **Should** | 2 |
 
 ---
 
@@ -53,11 +62,33 @@ Claude Code や Codex などの AI コーディングエージェントの普及
 - ツリー上ではスキル / コマンドとは別枠で最上位に独立表示する
 - 編集・プレビューは同じ split view を使用する
 - テンプレートの対象外とする（プロジェクト固有のため）
-- セクション単位のアウトライン表示を提供する（Should: Must 機能を優先し、余裕があれば実装）
+- ~~セクション単位のアウトライン表示を提供する~~（US-7: MVP スコープ外。v2 以降で設計・実装を検討する）
 
 ---
 
 ## 4. 画面構成
+
+### Phase 1
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  clens                                                    │
+├─────────────┬────────────────────────────────────────────┤
+│  📁 Explorer │                                            │
+│             │   ┌── Editor ────────┬── Preview ────────┐ │
+│  📄 CLAUDE.md│   │                  │                    │ │
+│             │   │  # Skill Name    │  Skill Name        │ │
+│  📂 Skills   │   │  Description...  │  Description...    │ │
+│   ├ skill-a │   │                  │  (rendered MD)     │ │
+│   └ skill-b │   │                  │                    │ │
+│             │   │                  │                    │ │
+│  📂 Commands │   └──────────────────┴────────────────────┘ │
+│   ├ cmd-1   │                                            │
+│   └ cmd-2   │                           [Save] [Revert] │
+└─────────────┴────────────────────────────────────────────┘
+```
+
+### Phase 2（+ New ボタン、削除コンテキストメニューを追加）
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -82,22 +113,21 @@ Claude Code や Codex などの AI コーディングエージェントの普及
 - ファイルツリー形式でスキル / コマンド / CLAUDE.md をカテゴリ分けして表示
 - 各ファイルをクリックで選択 → 右の split view に表示
 - カテゴリはデフォルトで展開状態
-- 「+ New」ボタンからテンプレート選択ダイアログを起動
-- ファイル項目の右クリックでコンテキストメニューを表示し「削除」を実行可能（Should: US-8 に対応）
-  - 削除時は確認ダイアログを表示する
+- 「+ New」ボタンからテンプレート選択ダイアログを起動 **〔Phase 2〕**
+- ファイル項目の右クリックでコンテキストメニューを表示し「削除」を実行可能 **〔Phase 2: US-8〕**
 
 ### 4.2 右ペイン — Split View
 
-- **左半分（Editor）:** CodeMirror 6 による Markdown エディタ。シンタックスハイライト付き
-- **右半分（Preview）:** react-markdown によるリアルタイムレンダリング（GFM 対応）
+- **左半分（Editor）:** Markdown エディタ。シンタックスハイライト付き
+- **右半分（Preview）:** リアルタイム Markdown レンダリング（GFM 対応）
 - エディタへの入力がリアルタイムでプレビューに反映される
 - Save ボタンまたはキーボードショートカット（Ctrl+S / Cmd+S）で実ファイルへ書き戻し
 - Revert ボタンでディスク上のファイル内容に戻す
 - Editor と Preview の分割比率は 50:50 固定（リサイズ不可）
-- 未保存の変更がある状態で別ファイルを選択した場合、確認ダイアログを表示し「保存して移動」「破棄して移動」「キャンセル」を選択させる
-- ブラウザタブを閉じようとした場合、未保存の変更があれば `beforeunload` でブラウザ標準の離脱確認を表示する
 
-### 4.3 新規作成ダイアログ
+> **Note:** 未保存変更時のファイル切り替え確認、ブラウザ離脱時の確認、削除時の確認ダイアログの詳細な挙動は基本設計書（`design.md`）セクション 8 を参照。
+
+### 4.3 新規作成ダイアログ **〔Phase 2〕**
 
 - テンプレート一覧から選択
 - ファイル名（スキル名 / コマンド名）を入力
@@ -107,233 +137,41 @@ Claude Code や Codex などの AI コーディングエージェントの普及
 ### 4.4 空状態（Empty State）
 
 - 対象ファイルが一件も検出されなかった場合、右ペインにガイダンスを表示する
-  - 「+ New」ボタンからスキルやコマンドを作成できる旨を案内する
+  - Phase 1: 「対象ファイルが見つかりません」の基本メッセージを表示
+  - Phase 2: 「+ New」ボタンからスキルやコマンドを作成できる旨を案内する
   - CLAUDE.md が存在しない場合もその旨を表示する
-- `.claude` ディレクトリが存在しない場合、新規作成時にサーバー側で自動生成する
+- `.claude` ディレクトリが存在しない場合、新規作成時にサーバー側で自動生成する **〔Phase 2〕**
 
 ---
 
-## 5. 技術アーキテクチャ
+## 5. CLI インターフェース
 
-### 5.1 参考設計
-
-[difit](https://github.com/yoshiko-pg/difit) のアーキテクチャをベースとする。単一パッケージ構成で CLI + サーバー + フロントエンドを `src/` 配下に共存させ、tsconfig を CLI 用とフロントエンド用に分離するパターンを踏襲する。
-
-### 5.2 技術スタック
-
-| レイヤー | 技術 | 選定理由 |
-|----------|------|----------|
-| CLI | Commander.js | difit と同一。引数解析の実績十分 |
-| サーバー | **Hono** (@hono/node-server) | 軽量・TS-first。npx 起動時の初回ダウンロードが速い |
-| リアルタイム通信 | **SSE** (hono/streaming) | サーバー → クライアントの一方向通知で十分。WebSocket 不要 |
-| ファイルウォッチ | chokidar | ファイルシステム監視の定番 |
-| フロントエンド | React 18 + Vite | difit と同パターン。HMR 対応 |
-| エディタ | **CodeMirror 6** | 軽量でバンドルサイズが小さい。Markdown サポート良好 |
-| プレビュー | react-markdown + remark-gfm | GFM テーブル・チェックリスト等を含む Markdown レンダリング |
-| スタイリング | Tailwind CSS v4 | difit と同一 |
-| テスト | Vitest | difit と同一。co-located test files |
-| Lint / Format | ESLint + Prettier | difit と同一 |
-
-### 5.3 ディレクトリ構成
-
-```
-clens/
-├── src/
-│   ├── cli/                        # CLI 層
-│   │   ├── index.ts                # エントリポイント（bin）
-│   │   ├── args.ts                 # 引数解析
-│   │   └── open-browser.ts         # ブラウザ自動起動
-│   │
-│   ├── server/                     # バックエンド層（Hono）
-│   │   ├── index.ts                # Hono アプリ定義
-│   │   ├── routes/
-│   │   │   ├── api.ts              # REST API（ファイル CRUD）
-│   │   │   └── sse.ts              # SSE エンドポイント
-│   │   ├── services/
-│   │   │   ├── scanner.ts          # スキル / コマンド自動検出
-│   │   │   ├── watcher.ts          # chokidar ファイルウォッチ
-│   │   │   └── templates.ts        # テンプレート管理
-│   │   └── types.ts               # サーバー内部のみで使う型
-│   │
-│   ├── app/                        # フロントエンド層（React）
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   ├── components/
-│   │   │   ├── Explorer.tsx        # ファイルツリー
-│   │   │   ├── Editor.tsx          # CodeMirror エディタ
-│   │   │   ├── Preview.tsx         # Markdown プレビュー
-│   │   │   ├── SplitView.tsx       # 分割レイアウト管理
-│   │   │   └── NewFileDialog.tsx   # テンプレート選択ダイアログ
-│   │   ├── hooks/
-│   │   │   ├── useSSE.ts           # SSE イベント購読
-│   │   │   └── useFileApi.ts       # REST API 呼び出し
-│   │   └── styles/
-│   │
-│   └── shared/                     # CLI / サーバー / フロントエンド共有
-│       ├── types.ts                # API の入出力に現れる共有型（FileNode, FileTree, Template 等）
-│       └── constants.ts            # パス規約、カテゴリ定義
-│
-├── templates/                      # 組み込みテンプレート
-│   ├── basic-skill.md
-│   ├── code-generation-skill.md
-│   ├── file-operation-skill.md
-│   ├── basic-command.md
-│   └── command-with-args.md
-│
-├── public/                         # 静的アセット
-├── tsconfig.json                   # フロントエンド用
-├── tsconfig.cli.json               # CLI + サーバー用
-├── vite.config.ts
-├── vitest.config.ts
-└── package.json
-```
-
-### 5.4 ビルドと配布
-
-- **開発モード (`pnpm run dev`):** Vite dev server（HMR）+ CLI サーバーを同時起動
-- **本番モード (`pnpm run build`):** Vite でフロントエンドをビルド → `dist/` に出力
-- **npm 配布:** ビルド済みフロントエンドをパッケージに同梱。`npx clens` で即時起動可能
-- **tsconfig 分離:** `tsconfig.json`（フロントエンド / Vite 用）と `tsconfig.cli.json`（CLI + サーバー用）
-
----
-
-## 6. API 設計
-
-### 6.1 REST API
-
-| メソッド | パス | 説明 | リクエスト | レスポンス |
-|----------|------|------|------------|------------|
-| `GET` | `/api/files` | ファイルツリー取得 | — | `FileTree` |
-| `GET` | `/api/files/:path` | ファイル内容取得 | — | `{ content: string, updatedAt: string }` |
-| `PUT` | `/api/files/:path` | ファイル保存（上書き） | `{ content: string }` | `{ success: boolean }` |
-| `POST` | `/api/files` | 新規ファイル作成 | `{ path: string, templateId?: string }` | `{ success: boolean, path: string }` |
-| `DELETE` | `/api/files/:path` | ファイル削除 | — | `{ success: boolean }` |
-| `GET` | `/api/templates` | テンプレート一覧取得 | — | `Template[]` |
-
-### 6.2 SSE
-
-| エンドポイント | イベント | ペイロード |
-|----------------|----------|------------|
-| `GET /api/sse` | `file:changed` | `{ path: string, content: string }` |
-| | `file:created` | `{ path: string }` |
-| | `file:deleted` | `{ path: string }` |
-
-### 6.3 型定義
-
-```typescript
-// ファイルの種類
-type FileCategory = 'skill' | 'command' | 'claude-md';
-
-// ファイルツリーのノード
-interface FileNode {
-  name: string;
-  path: string;           // プロジェクトルートからの相対パス
-  category: FileCategory;
-  description?: string;
-  // 抽出ルール:
-  //   skill: 最初の見出し（#）直後の段落テキスト
-  //   command: 最初の見出し（#）のテキスト
-  //   claude-md: null
-}
-
-// ファイルツリー全体
-interface FileTree {
-  root: string;           // プロジェクトルートの絶対パス
-  claudeMd: FileNode | null;
-  skills: FileNode[];
-  commands: FileNode[];
-}
-
-// テンプレート
-interface Template {
-  id: string;
-  name: string;
-  category: 'skill' | 'command';
-  description: string;
-  content: string;
-}
-```
-
----
-
-## 7. CLI インターフェース
-
-### 7.1 基本コマンド
-
-```bash
-# 基本起動（カレントディレクトリのプロジェクトを対象）
-npx clens
-
-# ポート指定
-npx clens --port 4000
-
-# 特定ディレクトリを対象
-npx clens --root ./my-project
-
-# ブラウザ自動起動を抑制
-npx clens --no-open
-```
-
-### 7.2 CLI オプション
+### 5.1 CLI オプション
 
 | フラグ | デフォルト | 説明 |
 |--------|-----------|------|
-| `--port` | `4567` | サーバーのポート番号。使用中の場合は +1 にフォールバック |
+| `--port` | `4567` | サーバーのポート番号 |
 | `--root` | `.`（カレントディレクトリ） | 対象プロジェクトのルートディレクトリ |
 | `--no-open` | `false` | ブラウザの自動起動を抑制 |
 | `--host` | `127.0.0.1` | バインドするホストアドレス |
 
----
-
-## 8. 動作フロー
-
-```
-npx clens
-  │
-  ├─ 1. CLI が引数を解析（--port, --root 等）
-  │
-  ├─ 2. scanner がプロジェクトルートを走査
-  │      ├─ .claude/skills/**/SKILL.md を検出
-  │      ├─ .claude/commands/*.md を検出
-  │      └─ CLAUDE.md の有無を確認
-  │
-  ├─ 3. Hono サーバーを起動
-  │      ├─ REST API ルート登録
-  │      ├─ SSE エンドポイント登録
-  │      ├─ ビルド済みフロントエンドを静的配信
-  │      └─ chokidar でファイルウォッチ開始
-  │
-  ├─ 4. ブラウザを自動起動（localhost:4567）
-  │
-  └─ 5. ユーザー操作ループ
-         ├─ ファイルツリーからファイル選択 → GET /api/files/:path
-         ├─ エディタで編集 → リアルタイムプレビュー反映
-         ├─ Save ボタン → PUT /api/files/:path → ファイルに書き戻し
-         ├─ 外部で変更 → chokidar 検知 → SSE で通知 → ブラウザ自動更新
-         └─ + New → テンプレート選択 → POST /api/files → 作成してエディタで開く
-```
+> **Note:** コマンド例やポートフォールバック挙動の詳細は基本設計書（`design.md`）セクション 7 を参照。
 
 ---
 
-## 9. 外部変更の競合ハンドリング
+## 6. 外部変更の競合ハンドリング **〔Phase 2〕**
 
-### 9.1 基本方針
+### 6.1 基本方針
 
-MVP では「最後の書き込み勝ち」方式を採用する。ただし、ユーザーが未保存の編集中に外部変更が発生した場合は警告を表示する。
+「最後の書き込み勝ち」方式を採用する。ただし、ユーザーが未保存の編集中に外部変更が発生した場合は警告を表示する。
 
-### 9.2 フロー
-
-1. chokidar がファイル変更を検知
-2. SSE で `file:changed` イベントをブラウザに通知
-3. ブラウザ側で未保存の変更があるかチェック
-   - **未保存の変更なし:** エディタとプレビューを自動更新
-   - **未保存の変更あり:** 警告ダイアログを表示し、「外部の変更を取り込む（自分の変更を破棄）」または「自分の変更を維持」を選択させる
+> **Note:** 競合検知時の具体的なフローは基本設計書（`design.md`）セクション 9 を参照。
 
 ---
 
-## 10. 組み込みテンプレート
+## 7. 組み込みテンプレート **〔Phase 2〕**
 
-### 10.1 テンプレート一覧
+### 7.1 テンプレート一覧
 
 | ID | テンプレート名 | カテゴリ | 説明 |
 |----|---------------|----------|------|
@@ -343,57 +181,32 @@ MVP では「最後の書き込み勝ち」方式を採用する。ただし、�
 | `basic-command` | Basic Command | command | コマンドの基本雛形 |
 | `command-with-args` | Command with Arguments | command | 引数付きコマンドの雛形 |
 
-### 10.2 テンプレート例（Basic Skill）
-
-```markdown
-# [Skill Name]
-
-## Overview
-
-[Brief description of what this skill does]
-
-## When to Use
-
-- [Trigger condition 1]
-- [Trigger condition 2]
-
-## Instructions
-
-[Detailed instructions for the AI agent]
-
-## Examples
-
-### Input
-[Example input]
-
-### Output
-[Example output]
-```
+> **Note:** テンプレートの具体的な内容例は基本設計書（`design.md`）セクション 10 を参照。
 
 ---
 
-## 11. 非機能要件
+## 8. 非機能要件
 
-### 11.1 パフォーマンス
+### 8.1 パフォーマンス
 
 - `npx` での初回起動（ダウンロード含む）が 10 秒以内
 - サーバー起動からブラウザ表示まで 2 秒以内
-- エディタ入力に対するデバウンス間隔: 100ms 以下
-- 外部ファイル変更から SSE 通知まで 500ms 以内
+- エディタ入力に対するプレビュー反映遅延: 100ms 以下
+- 外部ファイル変更から SSE 通知まで 500ms 以内 **〔Phase 2〕**
 
-### 11.2 互換性
+### 8.2 互換性
 
 - Node.js >= 20.0.0
 - 対応 OS: macOS, Linux, Windows (WSL 含む)
 - 対応ブラウザ: Chrome, Firefox, Safari, Edge（最新版）
 
-### 11.3 セキュリティ
+### 8.3 セキュリティ
 
 - サーバーはデフォルトで `127.0.0.1` にバインド（外部アクセス不可）
 - ファイル操作は `--root` で指定されたディレクトリ内に制限（パストラバーサル防止）
 - 対象ファイルはスキル / コマンド / CLAUDE.md に限定（任意ファイルの読み書き不可）
 
-### 11.4 パッケージサイズ
+### 8.4 パッケージサイズ
 
 - `npm pack` 出力の gzip 済みサイズを計測基準とする
 - 具体的な上限値はプロトタイプ実装後の実測に基づいて設定する
@@ -401,7 +214,7 @@ MVP では「最後の書き込み勝ち」方式を採用する。ただし、�
 
 ---
 
-## 12. 将来の拡張候補（v2 以降）
+## 9. 将来の拡張候補（v2 以降）
 
 以下は初期リリースのスコープ外とし、将来のバージョンで検討する。
 
@@ -411,9 +224,4 @@ MVP では「最後の書き込み勝ち」方式を採用する。ただし、�
 - ユーザー定義テンプレートの登録・管理
 - バリデーション機能（必須フィールドの欠落、フォーマット不正の検出）
 - CLI サブコマンド（`clens init skill my-skill` 等）
-
----
-
-## 13. 参考
-
-- **difit** ([github.com/yoshiko-pg/difit](https://github.com/yoshiko-pg/difit)): アーキテクチャの参考。単一パッケージ構成、Commander.js + Express + React + Vite + Tailwind CSS + Vitest のスタック。Express を Hono に置き換え、read-only viewer を read/write editor に拡張する設計。
+- CLAUDE.md のセクション単位アウトライン表示（US-7）
