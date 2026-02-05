@@ -157,13 +157,25 @@ type FileCategory = 'skill' | 'command' | 'claude-md';
 // ファイルツリーのノード
 interface FileNode {
   name: string;
+  // 導出ルール（カテゴリ別）:
+  //   skill:     SKILL.md の直上ディレクトリ名
+  //              例: .claude/skills/code-review/SKILL.md → "code-review"
+  //              例: .claude/skills/testing/unit/SKILL.md → "unit"
+  //   command:   ファイル名から拡張子 .md を除いた部分
+  //              例: .claude/commands/fix-lint.md → "fix-lint"
+  //   claude-md: 固定値 "CLAUDE.md"
   path: string;           // プロジェクトルートからの相対パス
   category: FileCategory;
   description?: string;
   // 抽出ルール:
-  //   skill: 最初の見出し（#）直後の段落テキスト
-  //   command: 最初の見出し（#）のテキスト
+  //   skill:     最初の見出し（#）直後の段落テキスト
+  //   command:   YAML frontmatter の description フィールド。
+  //              frontmatter が存在しない、または description フィールドがない場合は null
   //   claude-md: null
+  //
+  // 実装メモ: コマンドファイルの YAML frontmatter 解析には、`---` で囲まれた
+  // 先頭ブロックを抽出し、description フィールドの値を取得する。
+  // frontmatter が不正な YAML の場合は description を null として扱う。
 }
 
 // ファイルツリー全体
@@ -173,6 +185,10 @@ interface FileTree {
   skills: FileNode[];
   commands: FileNode[];
 }
+
+// ソート順:
+//   skills:   path の辞書順
+//   commands: name の辞書順
 
 // テンプレート
 interface Template {
@@ -190,7 +206,43 @@ interface ApiError {
 }
 ```
 
-### 5.4 セキュリティ設計
+### 5.4 ネストされたスキルの Explorer 表示ルール
+
+`FileTree.skills` は `FileNode[]`（フラット配列）のままとし、ツリーの階層化は行わない。
+Explorer での表示名は以下のロジックで決定する（フロントエンド `Explorer.tsx` 側で `path` から算出）:
+
+1. `skills` 配列内で `name` が一意の場合: `name` をそのまま表示
+2. `skills` 配列内で同一 `name` が複数存在する場合: `.claude/skills/` からの相対パス（`SKILL.md` を除く）を表示に使用する
+
+`FileNode` 型への追加フィールドは不要。`path` フィールドから算出可能なため。
+
+**例:**
+
+ファイルシステム:
+```
+.claude/skills/code-review/SKILL.md
+.claude/skills/frontend/utils/SKILL.md
+.claude/skills/backend/utils/SKILL.md
+```
+
+`FileTree.skills` のレスポンス（`path` の辞書順）:
+```json
+[
+  { "name": "utils",       "path": ".claude/skills/backend/utils/SKILL.md",  "category": "skill" },
+  { "name": "code-review", "path": ".claude/skills/code-review/SKILL.md",    "category": "skill" },
+  { "name": "utils",       "path": ".claude/skills/frontend/utils/SKILL.md", "category": "skill" }
+]
+```
+
+Explorer 表示:
+```
+Skills
+ ├─ backend/utils        ← name "utils" が重複するため親パスを付与
+ ├─ code-review          ← name が一意なのでそのまま
+ └─ frontend/utils       ← name "utils" が重複するため親パスを付与
+```
+
+### 5.5 セキュリティ設計
 
 要件定義書 §8.3 で定義されたセキュリティ要件を以下の方針で実現する。
 
