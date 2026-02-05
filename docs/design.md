@@ -2,6 +2,15 @@
 
 本ドキュメントは要件定義書（`requirements.md`）で定義された「何を実現するか」に対して、「どう実現するか」を記述する。
 
+### Phase スコープ
+
+要件定義書 §1.5 に基づき、本設計書でも Phase 1 / Phase 2 の区分を明示する。各セクションで **〔Phase 2〕** と記載された箇所は Phase 1 の実装スコープ外とする。
+
+| Phase | 設計上の主な対象 |
+|-------|-----------------|
+| **Phase 1** | CLI 起動、ファイルスキャン、REST API（GET / PUT）、Explorer、CodeMirror エディタ、プレビュー、保存、セキュリティミドルウェア |
+| **Phase 2** | SSE / chokidar、テンプレート / 新規作成（POST）、削除（DELETE）、競合ハンドリング |
+
 ---
 
 ## 1. 参考設計
@@ -18,8 +27,8 @@ Express を Hono に置き換え、read-only viewer を read/write editor に拡
 |----------|------|----------|
 | CLI | Commander.js | difit と同一。引数解析の実績十分 |
 | サーバー | **Hono** (@hono/node-server) | 軽量・TS-first。npx 起動時の初回ダウンロードが速い |
-| リアルタイム通信 | **SSE** (hono/streaming) | サーバー → クライアントの一方向通知で十分。WebSocket 不要 |
-| ファイルウォッチ | chokidar v4 | ファイルシステム監視の定番。ESM-only で Node.js 20+ 要件と整合 |
+| リアルタイム通信 | **SSE** (hono/streaming) | サーバー → クライアントの一方向通知で十分。WebSocket 不要 **〔Phase 2〕** |
+| ファイルウォッチ | chokidar v4 | ファイルシステム監視の定番。ESM-only で Node.js 20+ 要件と整合 **〔Phase 2〕** |
 | フロントエンド | React 19 + Vite | 新規プロジェクトのため最新安定版を採用。HMR 対応 |
 | エディタ | **CodeMirror 6** | 軽量でバンドルサイズが小さい。Markdown サポート良好 |
 | プレビュー | react-markdown + remark-gfm | GFM テーブル・チェックリスト等を含む Markdown レンダリング |
@@ -44,12 +53,12 @@ clens/
 │   │   ├── index.ts                # Hono アプリ定義
 │   │   ├── routes/
 │   │   │   ├── api.ts              # REST API（ファイル CRUD）
-│   │   │   ├── sse.ts              # SSE エンドポイント
+│   │   │   ├── sse.ts              # SSE エンドポイント              〔Phase 2〕
 │   │   │   └── middleware.ts       # パス検証・セキュリティミドルウェア
 │   │   ├── services/
 │   │   │   ├── scanner.ts          # スキル / コマンド自動検出
-│   │   │   ├── watcher.ts          # chokidar ファイルウォッチ
-│   │   │   └── templates.ts        # テンプレート管理
+│   │   │   ├── watcher.ts          # chokidar ファイルウォッチ       〔Phase 2〕
+│   │   │   └── templates.ts        # テンプレート管理               〔Phase 2〕
 │   │   └── types.ts               # サーバー内部のみで使う型
 │   │
 │   ├── app/                        # フロントエンド層（React）
@@ -60,11 +69,11 @@ clens/
 │   │   │   ├── Editor.tsx          # CodeMirror エディタ
 │   │   │   ├── Preview.tsx         # Markdown プレビュー
 │   │   │   ├── SplitView.tsx       # 分割レイアウト管理
-│   │   │   └── NewFileDialog.tsx   # テンプレート選択ダイアログ
+│   │   │   └── NewFileDialog.tsx   # テンプレート選択ダイアログ     〔Phase 2〕
 │   │   ├── contexts/
 │   │   │   └── AppContext.tsx       # アプリケーション状態（選択中ファイル、ダーティ状態等）
 │   │   ├── hooks/
-│   │   │   ├── useSSE.ts           # SSE イベント購読
+│   │   │   ├── useSSE.ts           # SSE イベント購読              〔Phase 2〕
 │   │   │   └── useFileApi.ts       # REST API 呼び出し
 │   │   └── styles/
 │   │
@@ -72,7 +81,7 @@ clens/
 │       ├── types.ts                # API の入出力に現れる共有型（FileNode, FileTree, Template 等）
 │       └── constants.ts            # パス規約、カテゴリ定義
 │
-├── templates/                      # 組み込みテンプレート
+├── templates/                      # 組み込みテンプレート             〔Phase 2〕
 │   ├── basic-skill.md
 │   ├── code-generation-skill.md
 │   ├── file-operation-skill.md
@@ -108,14 +117,14 @@ clens/
 
 実装時のルート定義: `/api/files/:path{.+}`
 
-| メソッド | パス | 説明 | リクエスト | レスポンス |
-|----------|------|------|------------|------------|
-| `GET` | `/api/files` | ファイルツリー取得 | — | `FileTree` |
-| `GET` | `/api/files/:path{.+}` | ファイル内容取得 | — | `{ content: string, updatedAt: string }` |
-| `PUT` | `/api/files/:path{.+}` | ファイル保存（上書き）。成功時 200 | `{ content: string }` | `{ updatedAt: string }` |
-| `POST` | `/api/files` | 新規ファイル作成。指定パスに既存ファイルがある場合は 409 Conflict を返す | `{ path: string, templateId?: string }` | `{ path: string }` |
-| `DELETE` | `/api/files/:path{.+}` | ファイル削除。スキルの場合はディレクトリごと削除する。成功時 204 No Content | — | （なし） |
-| `GET` | `/api/templates` | テンプレート一覧取得 | — | `Template[]` |
+| メソッド | パス | 説明 | リクエスト | レスポンス | Phase |
+|----------|------|------|------------|------------|-------|
+| `GET` | `/api/files` | ファイルツリー取得 | — | `FileTree` | 1 |
+| `GET` | `/api/files/:path{.+}` | ファイル内容取得 | — | `{ content: string, updatedAt: string }` | 1 |
+| `PUT` | `/api/files/:path{.+}` | ファイル保存（上書き）。成功時 200 | `{ content: string }` | `{ updatedAt: string }` | 1 |
+| `POST` | `/api/files` | 新規ファイル作成。指定パスに既存ファイルがある場合は 409 Conflict を返す | `{ path: string, templateId?: string }` | `{ path: string }` | 2 |
+| `DELETE` | `/api/files/:path{.+}` | ファイル削除。スキルの場合はディレクトリごと削除する。成功時 204 No Content | — | （なし） | 2 |
+| `GET` | `/api/templates` | テンプレート一覧取得 | — | `Template[]` | 2 |
 
 #### 主要エラーステータスコード
 
@@ -129,7 +138,7 @@ clens/
 | `409 Conflict` | `CONFLICT` | POST で既存ファイルと衝突 |
 | `500 Internal Server Error` | `INTERNAL_ERROR` | サーバー内部エラー |
 
-### 5.2 SSE
+### 5.2 SSE **〔Phase 2〕**
 
 | エンドポイント | イベント | ペイロード |
 |----------------|----------|------------|
@@ -211,6 +220,8 @@ API ルート `/api/files/:path{.+}` に対する共通ミドルウェアで、�
 
 ## 6. 動作フロー
 
+### 6.1 Phase 1 フロー
+
 ```
 npx clens
   │
@@ -222,22 +233,32 @@ npx clens
   │      └─ CLAUDE.md の有無を確認
   │
   ├─ 3. Hono サーバーを起動
-  │      ├─ REST API ルート登録
-  │      ├─ SSE エンドポイント登録
-  │      ├─ ビルド済みフロントエンドを静的配信
-  │      └─ chokidar でファイルウォッチ開始
+  │      ├─ REST API ルート登録（GET, PUT のみ）
+  │      └─ ビルド済みフロントエンドを静的配信
   │
   ├─ 4. ブラウザを自動起動（localhost:4567）
   │
   └─ 5. ユーザー操作ループ
          ├─ ファイルツリーからファイル選択 → GET /api/files/:path{.+}
          ├─ エディタで編集 → リアルタイムプレビュー反映
-         ├─ Save ボタン → PUT /api/files/:path{.+} → ファイルに書き戻し
-         ├─ 外部で変更 → chokidar 検知 → SSE で通知 → ブラウザ自動更新
-         └─ + New → テンプレート選択 → POST /api/files → 作成してエディタで開く
+         └─ Save ボタン → PUT /api/files/:path{.+} → ファイルに書き戻し
 ```
 
-### 6.1 watcher → SSE モジュール間通信
+### 6.2 Phase 2 フロー（Phase 1 に追加される要素）
+
+```
+  ├─ 3. Hono サーバーを起動
+  │      ├─ REST API ルート登録（POST, DELETE, GET /api/templates を追加）
+  │      ├─ SSE エンドポイント登録
+  │      └─ chokidar でファイルウォッチ開始
+  │
+  └─ 5. ユーザー操作ループ（追加分）
+         ├─ 外部で変更 → chokidar 検知 → SSE で通知 → ブラウザ自動更新
+         ├─ + New → テンプレート選択 → POST /api/files → 作成してエディタで開く
+         └─ 削除 → 確認ダイアログ → DELETE /api/files/:path{.+}
+```
+
+### 6.3 watcher → SSE モジュール間通信 **〔Phase 2〕**
 
 `watcher.ts` と `sse.ts` 間の通信には Node.js 標準の `EventEmitter` パターンを採用する。
 
@@ -290,13 +311,13 @@ npx clens --no-open
 
 ブラウザタブを閉じようとした場合、未保存の変更があれば `beforeunload` イベントでブラウザ標準の離脱確認を表示する。
 
-### 8.4 削除時の確認
+### 8.4 削除時の確認 **〔Phase 2〕**
 
 ファイル削除時は確認ダイアログを表示する。
 
 ---
 
-## 9. 外部変更の競合ハンドリング — フロー
+## 9. 外部変更の競合ハンドリング — フロー **〔Phase 2〕**
 
 1. chokidar がファイル変更を検知
 2. SSE で `file:changed` イベントをブラウザに通知
@@ -306,7 +327,7 @@ npx clens --no-open
 
 ---
 
-## 10. テンプレート内容例
+## 10. テンプレート内容例 **〔Phase 2〕**
 
 ### 10.1 Basic Skill
 
